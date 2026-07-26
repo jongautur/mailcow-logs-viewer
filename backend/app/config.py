@@ -42,6 +42,12 @@ class Settings(BaseSettings):
         default="",
         description="Comma-separated list of email addresses to hide from logs"
     )
+
+    # SMTP abuse protection
+    smtp_abuse_enabled: bool = Field(default=False, env="SMTP_ABUSE_ENABLED", description="Automatically block mailboxes exceeding the SMTP message threshold")
+    smtp_abuse_threshold: int = Field(default=100, env="SMTP_ABUSE_THRESHOLD", description="Outbound messages allowed in the rolling window")
+    smtp_abuse_window_minutes: int = Field(default=60, env="SMTP_ABUSE_WINDOW_MINUTES", description="Rolling SMTP abuse window in minutes")
+    smtp_abuse_help_address: str = Field(default="", env="SMTP_ABUSE_HELP_ADDRESS", description="Support address included in SMTP abuse notifications")
     
     # Fetch Configuration
     fetch_interval: int = Field(default=60, description="Seconds between log fetches")

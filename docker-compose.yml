@@ -20,6 +20,9 @@ services:
 
   # Main Application
   app:
+    build:
+      context: .
+      dockerfile: Dockerfile
     image: ghcr.io/shlomiporush/mailcow-logs-viewer:latest
     container_name: mailcow-logs-app
     restart: unless-stopped
@@ -28,6 +31,11 @@ services:
         condition: service_healthy
     ports:
       - "8080:8080"
+    # If Mailcow runs on the same Docker host, resolve its public hostname
+    # through the host gateway to avoid NAT/certificate issues. Set
+    # MAILCOW_HOSTNAME in the local .env; the example value is not committed.
+    extra_hosts:
+      - "${MAILCOW_HOSTNAME:-mailcow-host-gateway.invalid}:host-gateway"
     volumes:
       - mailcowlogs_data:/app/data
     networks:

@@ -5,6 +5,7 @@ Handles authentication and API calls to mailcow instance
 import asyncio
 import httpx
 import logging
+from urllib.parse import quote
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 from tenacity import retry, stop_after_attempt, wait_exponential
@@ -656,6 +657,29 @@ class MailcowAPI:
         except MailcowAPIError as e:
             logger.error(f"Failed to fetch mailboxes: {e}")
             return []
+
+    async def edit_mailbox(self, mailbox: str, attributes: Dict[str, Any]) -> Any:
+        """Update selected mailbox attributes using the read-write API key."""
+        return await self._make_rw_request(
+            "/api/v1/edit/mailbox",
+            method="POST",
+            json={"attr": attributes, "items": [mailbox]}
+        )
+
+    async def get_app_passwords(self, mailbox: str) -> List[Dict[str, Any]]:
+        """List app passwords for a mailbox."""
+        data = await self._make_request(f"/api/v1/get/app-passwd/all/{quote(mailbox, safe='@')}")
+        return data if isinstance(data, list) else []
+
+    async def delete_app_passwords(self, ids: List[str]) -> Any:
+        """Delete one or more app passwords using the read-write API key."""
+        if not ids:
+            return []
+        return await self._make_rw_request(
+            "/api/v1/delete/app-passwd",
+            method="POST",
+            json=ids
+        )
     
     async def get_aliases(self) -> List[Dict[str, Any]]:
         """
@@ -887,7 +911,7 @@ class MailcowAPI:
     async def unban_fail2ban(self, ip: str) -> Dict[str, Any]:
         """
         Unban an IP address in Fail2Ban on mailcow using the Read-Write API key.
-        
+
         Args:
             ip: IP address to unban
         

@@ -1178,6 +1178,31 @@
                     </details>
                 </div>
 
+                <!-- SMTP Abuse Protection -->
+                <div class="mb-4">
+                    <details
+                        class="group bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30 overflow-hidden">
+                        <summary
+                            class="list-none px-6 py-4 border-b border-gray-200 dark:border-gray-700 cursor-pointer flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors select-none">
+                            <h2 class="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+                                <svg class="w-5 h-5 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M5.07 19h13.86c1.54 0 2.5-1.67 1.73-3L13.73 4a2 2 0 00-3.46 0L3.34 16c-.77 1.33.19 3 1.73 3z"></path>
+                                </svg>
+                                Abuse Protection
+                            </h2>
+                            <svg class="w-5 h-5 text-gray-400 transition-transform duration-200 group-open:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                            </svg>
+                        </summary>
+                        <div id="smtp-abuse-panel" class="p-4 sm:p-6">
+                            <div class="text-center py-6">
+                                <div class="loading mx-auto mb-4"></div>
+                                <p class="text-gray-500 dark:text-gray-400">Loading abuse protection...</p>
+                            </div>
+                        </div>
+                    </details>
+                </div>
+
                 <!-- Filters -->
                 <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30 p-4 mb-4">
                 <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">

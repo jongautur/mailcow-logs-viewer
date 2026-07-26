@@ -1426,6 +1426,7 @@ function switchTab(tab, params = {}) {
         case 'netfilter':
             loadNetfilterLogs(1);
             loadFail2BanSettings();
+            loadSmtpAbusePanel();
             loadNetfilterCountries();
             loadSecurityCountryChart(30);
             break;
@@ -4895,7 +4896,8 @@ function renderStatusJobs(jobs) {
             icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path>',
             jobs: [
                 ['DNS Check (All Domains)', 'dns_check', jobs.dns_check],
-                ['IP Blacklist Check (All Hosts)', 'blacklist_check', jobs.blacklist_check]
+                ['IP Blacklist Check (All Hosts)', 'blacklist_check', jobs.blacklist_check],
+                ['SMTP Abuse Protection', 'smtp_abuse', jobs.smtp_abuse]
             ]
         },
         {
@@ -8588,6 +8590,168 @@ function renderSettings(content, data) {
             };
         }
     }
+
+}
+
+let smtpAbusePage = 1;
+let smtpAbuseStatus = null;
+let smtpAbuseWhitelist = [];
+let smtpWhitelistEditing = false;
+
+async function loadSmtpAbusePanel() {
+    const panel = document.getElementById('smtp-abuse-panel');
+    if (!panel) return;
+
+    panel.innerHTML = '<div class="p-6 text-sm text-gray-500 dark:text-gray-400">Loading abuse protection...</div>';
+
+    try {
+        const [statusResponse, whitelistResponse] = await Promise.all([
+            authenticatedFetch('/api/smtp-abuse/status?limit=10'),
+            authenticatedFetch('/api/smtp-abuse/whitelist')
+        ]);
+        if (!statusResponse.ok || !whitelistResponse.ok) throw new Error('HTTP error');
+        smtpAbuseStatus = await statusResponse.json();
+        smtpAbuseWhitelist = await whitelistResponse.json();
+        renderSmtpAbusePanel();
+    } catch (error) {
+        panel.innerHTML = '<div class="p-6 text-sm text-red-600">Could not load abuse protection.</div>';
+        console.error('SMTP abuse panel error:', error);
+    }
+}
+
+function renderSmtpAbusePanel() {
+    const panel = document.getElementById('smtp-abuse-panel');
+    if (!panel || !smtpAbuseStatus) return;
+    const status = smtpAbuseStatus;
+    const protectionLocked = !mailcowRwConfigured || !status.enabled;
+    const filter = (document.getElementById('smtp-abuse-whitelist-filter')?.value || '').toLowerCase();
+    const filteredWhitelist = smtpAbuseWhitelist.filter(item => item.email.toLowerCase().includes(filter));
+    const allRows = status.mailboxes || [];
+    const closedRows = allRows.filter(item => item.smtp_access === false);
+    const activityRows = allRows.filter(item => item.smtp_access !== false);
+    const pageCount = Math.max(1, Math.ceil(activityRows.length / 5));
+    smtpAbusePage = Math.min(smtpAbusePage, pageCount);
+    const pageRows = activityRows.slice((smtpAbusePage - 1) * 5, smtpAbusePage * 5);
+    const renderMailboxRow = item => `
+            <tr class="border-t border-gray-200 dark:border-gray-700">
+                <td class="px-4 py-3 font-mono text-sm text-gray-900 dark:text-white">${escapeHtml(item.email)}</td>
+                <td class="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">${item.message_count}</td>
+                <td class="px-4 py-3">${item.whitelisted ? '<span class="text-green-600">Whitelisted</span>' : (item.over_threshold ? '<span class="text-red-600 font-medium">Over limit</span>' : '<span class="text-gray-500">Normal</span>')}</td>
+                <td class="px-4 py-3 text-right whitespace-nowrap">${item.smtp_access === false
+                    ? `<button onclick="smtpAbuseAction('${escapeJsArg(encodeURIComponent(item.email))}', 'unblock')" class="px-2 py-1 text-xs rounded bg-green-600 hover:bg-green-700 text-white">Open SMTP</button>`
+                    : `<button onclick="smtpAbuseAction('${escapeJsArg(encodeURIComponent(item.email))}', 'block')" class="px-2 py-1 text-xs rounded bg-red-600 hover:bg-red-700 text-white">Close SMTP</button>`}
+                </td>
+            </tr>`;
+    const rows = pageRows.map(renderMailboxRow).join('');
+    const closedMailboxRows = closedRows.map(renderMailboxRow).join('');
+    const whitelistRows = filteredWhitelist.map(item => `
+            <li class="flex items-center justify-between gap-3 py-2 border-t border-gray-200 dark:border-gray-700">
+                <span class="font-mono text-sm text-gray-900 dark:text-white">${escapeHtml(item.email)}</span>
+                <button onclick="removeSmtpAbuseWhitelist('${escapeJsArg(encodeURIComponent(item.email))}')" class="text-xs text-red-600 hover:underline">Remove</button>
+            </li>`).join('');
+    panel.innerHTML = `
+            <div class="p-4 border-b border-gray-200 dark:border-gray-700">
+                <h3 class="text-lg font-semibold text-gray-900 dark:text-white">SMTP abuse protection</h3>
+                <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">${status.enabled ? `Automatic blocking is enabled: more than ${status.threshold} messages in ${status.window_minutes} minutes.` : 'Automatic blocking is disabled. Configure SMTP_ABUSE_ENABLED and the threshold in the environment.'}</p>
+            </div>
+            <div class="p-4 space-y-6">
+                <form onsubmit="saveSmtpAbuseWhitelist(event)" class="space-y-2">
+                    <div class="flex items-center justify-between gap-2">
+                        <div><label for="smtp-abuse-whitelist-textarea" class="font-medium text-gray-900 dark:text-white block">Whitelist</label><p class="text-xs text-gray-500 dark:text-gray-400">One email address per line, like the Fail2ban IP lists.</p></div>
+                        ${smtpWhitelistEditing ? '' : '<button type="button" onclick="editSmtpAbuseWhitelist()" class="px-3 py-1.5 bg-gray-200 dark:bg-gray-600 hover:bg-gray-300 dark:hover:bg-gray-500 text-gray-700 dark:text-gray-200 text-sm font-medium rounded-lg">Edit whitelist</button>'}
+                    </div>
+                    <textarea id="smtp-abuse-whitelist-textarea" rows="5" placeholder="trusted@example.com&#10;monitoring@example.com" ${smtpWhitelistEditing ? '' : 'disabled'} class="w-full px-2 py-1.5 text-sm font-mono rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-green-700 dark:text-green-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-y disabled:opacity-60">${escapeHtml(smtpAbuseWhitelist.map(item => item.email).join('\n'))}</textarea>
+                    ${smtpWhitelistEditing ? '<div class="flex justify-end"><button type="submit" class="px-3 py-2 rounded bg-blue-600 hover:bg-blue-700 text-white text-sm">Save whitelist</button></div>' : ''}
+                </form>
+                <div>
+                    <div class="flex flex-wrap items-center justify-between gap-2 mb-2"><h4 class="font-medium text-gray-900 dark:text-white">Whitelisted mailboxes</h4><input id="smtp-abuse-whitelist-filter" type="search" value="${escapeHtml(filter)}" oninput="renderSmtpAbusePanel()" placeholder="Filter whitelist" class="rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm"></div>
+                    <ul>${whitelistRows || '<li class="text-sm text-gray-500">No matching whitelist entries</li>'}</ul>
+                </div>
+                <form onsubmit="closeSingleSmtpMailbox(event)" class="flex flex-wrap gap-2 border-t border-gray-200 dark:border-gray-700 pt-4">
+                    <input id="smtp-abuse-close-email" type="email" required placeholder="Close SMTP for this email" class="flex-1 min-w-56 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm">
+                    <button class="px-3 py-2 rounded bg-red-600 hover:bg-red-700 text-white text-sm">Close SMTP</button>
+                </form>
+                ${closedRows.length ? `<div><h4 class="font-medium text-gray-900 dark:text-white mb-2">SMTP-closed mailboxes</h4><div class="overflow-x-auto"><table class="w-full"><thead><tr class="text-left text-xs uppercase text-gray-500"><th class="px-4 py-2">Mailbox</th><th class="px-4 py-2">Messages</th><th class="px-4 py-2">Status</th><th class="px-4 py-2"></th></tr></thead><tbody>${closedMailboxRows}</tbody></table></div></div>` : ''}
+                <div><h4 class="font-medium text-gray-900 dark:text-white mb-2">Top 10 SMTP activity</h4><div class="overflow-x-auto"><table class="w-full"><thead><tr class="text-left text-xs uppercase text-gray-500"><th class="px-4 py-2">Mailbox</th><th class="px-4 py-2">Messages</th><th class="px-4 py-2">Status</th><th class="px-4 py-2"></th></tr></thead><tbody>${rows || '<tr><td colspan="4" class="px-4 py-3 text-sm text-gray-500">No SMTP activity in the current window</td></tr>'}</tbody></table></div>
+                <div class="flex justify-center items-center gap-3 mt-4"><button onclick="smtpAbusePage--; renderSmtpAbusePanel()" ${smtpAbusePage === 1 ? 'disabled' : ''} class="px-3 py-1.5 text-sm bg-gray-100 dark:bg-gray-700 rounded disabled:opacity-50">Previous</button><span class="text-sm text-gray-600 dark:text-gray-400">Page ${smtpAbusePage} of ${pageCount}</span><button onclick="smtpAbusePage++; renderSmtpAbusePanel()" ${smtpAbusePage === pageCount ? 'disabled' : ''} class="px-3 py-1.5 text-sm bg-gray-100 dark:bg-gray-700 rounded disabled:opacity-50">Next</button></div></div>
+                </div>
+            </div>`;
+    panel.classList.add('relative');
+    const lockReasons = [];
+    if (!mailcowRwConfigured) lockReasons.push('a Read-Write Mailcow API key is missing');
+    if (!status.enabled) lockReasons.push('SMTP abuse protection is disabled');
+    if (protectionLocked) {
+        panel.insertAdjacentHTML('afterbegin', `
+            <div class="absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-white/80 dark:bg-gray-900/85 backdrop-blur-[1px] p-6">
+                <div class="max-w-lg text-center">
+                    <div class="text-3xl mb-2">🔒</div>
+                    <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Abuse protection is locked</h3>
+                    <p class="mt-2 text-sm text-gray-600 dark:text-gray-300">Enable SMTP abuse protection and configure ${!mailcowRwConfigured ? '<code>MAILCOW_API_KEY_RW</code>' : 'the protection setting'} to use these controls.</p>
+                    <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">${escapeHtml(lockReasons.join(' and '))}.</p>
+                </div>
+            </div>`);
+    }
+}
+
+async function closeSingleSmtpMailbox(event) {
+    event.preventDefault();
+    const input = document.getElementById('smtp-abuse-close-email');
+    await smtpAbuseAction(encodeURIComponent(input.value), 'block');
+}
+
+async function smtpAbuseAction(encodedEmail, action) {
+    const email = decodeURIComponent(encodedEmail);
+    const response = await authenticatedFetch(`/api/smtp-abuse/mailboxes/${encodeURIComponent(email)}/${action}`, { method: 'POST' });
+    if (!response.ok) {
+        const detail = await response.json().catch(() => ({}));
+        showToast(detail.detail || `Could not ${action} SMTP`, 'error');
+        return;
+    }
+    showToast(action === 'block' ? 'SMTP blocked' : 'SMTP re-enabled', 'success');
+    loadSmtpAbusePanel();
+}
+
+async function addSmtpAbuseWhitelist(event) {
+    event.preventDefault();
+    const response = await authenticatedFetch('/api/smtp-abuse/whitelist', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: document.getElementById('smtp-abuse-whitelist-email').value, notes: document.getElementById('smtp-abuse-whitelist-notes').value })
+    });
+    if (!response.ok) { showToast('Could not update whitelist', 'error'); return; }
+    showToast('Whitelist updated', 'success');
+    loadSmtpAbusePanel();
+}
+
+async function saveSmtpAbuseWhitelist(event) {
+    event.preventDefault();
+    const emails = document.getElementById('smtp-abuse-whitelist-textarea').value
+        .split(/\r?\n/).map(email => email.trim()).filter(Boolean);
+    const response = await authenticatedFetch('/api/smtp-abuse/whitelist', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ emails })
+    });
+    if (!response.ok) {
+        const detail = await response.json().catch(() => ({}));
+        showToast(detail.detail || 'Could not save whitelist', 'error');
+        return;
+    }
+    smtpWhitelistEditing = false;
+    showToast('Whitelist saved', 'success');
+    loadSmtpAbusePanel();
+}
+
+function editSmtpAbuseWhitelist() {
+    smtpWhitelistEditing = true;
+    renderSmtpAbusePanel();
+    document.getElementById('smtp-abuse-whitelist-textarea')?.focus();
+}
+
+async function removeSmtpAbuseWhitelist(encodedEmail) {
+    const email = decodeURIComponent(encodedEmail);
+    const response = await authenticatedFetch(`/api/smtp-abuse/whitelist/${encodeURIComponent(email)}`, { method: 'DELETE' });
+    if (!response.ok) { showToast('Could not remove whitelist entry', 'error'); return; }
+    showToast('Whitelist entry removed', 'success');
+    loadSmtpAbusePanel();
 }
 
 async function showGeoIPSetupModal() {

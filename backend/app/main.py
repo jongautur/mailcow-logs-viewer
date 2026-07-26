@@ -32,6 +32,7 @@ from .routers import (
     rspamd_maps as rspamd_maps_router,
     suppressions as suppressions_router,
     quarantine_rules as quarantine_rules_router,
+    smtp_abuse as smtp_abuse_router,
 )
 from .migrations import run_migrations
 from .auth import BasicAuthMiddleware
@@ -250,6 +251,7 @@ app.include_router(raw_logs_router.router, prefix="/api", tags=["Raw Logs"])
 app.include_router(rspamd_maps_router.router, prefix="/api", tags=["Rspamd Maps"])
 app.include_router(suppressions_router.router, prefix="/api", tags=["Suppressions"])
 app.include_router(quarantine_rules_router.router, tags=["Quarantine Rules"])
+app.include_router(smtp_abuse_router.router, prefix="/api", tags=["SMTP Abuse"])
 
 # WebSocket endpoint needs root-level mount (not under /api prefix)
 # The router contains /ws/raw-logs which should be accessible at wss://host/ws/raw-logs  # nosemgrep: javascript.lang.security.detect-insecure-websocket.detect-insecure-websocket

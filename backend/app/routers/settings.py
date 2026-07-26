@@ -404,6 +404,14 @@ def get_settings_info(db: Session = Depends(get_db)):
                     "status": jobs_status.get('cleanup_deferred_queue', {}).get('status', 'idle') if (settings.is_feature_enabled('spam-filter') and settings.suppression_enabled and settings.queue_cleanup_enabled) else 'disabled',
                     "last_run": format_datetime_utc(jobs_status.get('cleanup_deferred_queue', {}).get('last_run')) if (settings.is_feature_enabled('spam-filter') and settings.suppression_enabled and settings.queue_cleanup_enabled) else None,
                     "error": jobs_status.get('cleanup_deferred_queue', {}).get('error') if (settings.is_feature_enabled('spam-filter') and settings.suppression_enabled and settings.queue_cleanup_enabled) else None
+                },
+                "smtp_abuse": {
+                    "interval": "1 minute" if (settings.smtp_abuse_enabled and mailcow_api.has_rw_key) else ("Disabled (SMTP abuse protection off)" if not settings.smtp_abuse_enabled else "Disabled (no RW API key)"),
+                    "description": "Checks rolling outbound message counts and disables SMTP for abusive mailboxes",
+                    "enabled": settings.smtp_abuse_enabled and mailcow_api.has_rw_key,
+                    "status": jobs_status.get('smtp_abuse', {}).get('status', 'idle') if (settings.smtp_abuse_enabled and mailcow_api.has_rw_key) else 'disabled',
+                    "last_run": format_datetime_utc(jobs_status.get('smtp_abuse', {}).get('last_run')) if (settings.smtp_abuse_enabled and mailcow_api.has_rw_key) else None,
+                    "error": jobs_status.get('smtp_abuse', {}).get('error') if (settings.smtp_abuse_enabled and mailcow_api.has_rw_key) else None
                 }
             },
             "smtp_configuration": {
@@ -913,6 +921,7 @@ def trigger_job(job_name: str, background_tasks: BackgroundTasks):
     - blacklist_check: Check server IP against blacklists
     - fetch_raw_logs: Fetch raw logs from mailcow services
     - cleanup_raw_logs: Remove raw logs older than retention period
+    - smtp_abuse: Check outbound activity and apply SMTP abuse protection
     """
     # Import job functions here to avoid circular imports
     from ..scheduler import (
@@ -935,7 +944,8 @@ def trigger_job(job_name: str, background_tasks: BackgroundTasks):
         sync_suppressions_to_rspamd_job,
         expire_suppressions_job,
         process_quarantine_rules_job,
-        cleanup_deferred_queue_job
+        cleanup_deferred_queue_job,
+        smtp_abuse_job
     )
     from ..raw_logs_worker import fetch_raw_service_logs, cleanup_raw_service_logs
     
@@ -963,6 +973,7 @@ def trigger_job(job_name: str, background_tasks: BackgroundTasks):
         'expire_suppressions': ('expire_suppressions', expire_suppressions_job, False),
         'process_quarantine_rules': ('process_quarantine_rules', process_quarantine_rules_job, False),
         'cleanup_deferred_queue': ('cleanup_deferred_queue', cleanup_deferred_queue_job, False),
+        'smtp_abuse': ('smtp_abuse', smtp_abuse_job, True),
         'fetch_raw_logs': ('fetch_raw_logs', fetch_raw_service_logs, True),
         'cleanup_raw_logs': ('cleanup_raw_logs', cleanup_raw_service_logs, True),
     }

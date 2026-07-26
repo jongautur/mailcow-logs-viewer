@@ -23,6 +23,14 @@ MAILCOW_API_KEY=your_api_key_here
 POSTGRES_PASSWORD=a7f3c8e2-4b1d-4f9a-8c3e-7d2f1a9b5e4c
 ```
 
+If Mailcow runs on the same Docker host and the public Mailcow hostname causes a NAT or certificate error, also add this to the local `.env` file:
+
+```env
+MAILCOW_HOSTNAME=mail.example.com
+```
+
+Leave `MAILCOW_HOSTNAME` unset when Mailcow runs on a separate host. See the [Environment Variables Reference](ENV_Settings.md#docker-host-gateway-routing) for details.
+
 > **💡 Tip:** After starting the application, you can configure most other settings from the web UI (Settings tab). See [Settings UI Guide](Settings_UI.md) for details.
 
 **Start:**

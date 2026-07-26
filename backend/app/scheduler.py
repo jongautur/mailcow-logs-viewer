@@ -15,13 +15,13 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy.orm import Session
-from sqlalchemy import desc, or_
+from sqlalchemy import desc, or_, func
 from sqlalchemy.exc import IntegrityError
 
 from .config import settings, set_cached_active_domains
 from .database import get_db_context, SessionLocal
 from .mailcow_api import mailcow_api
-from .models import PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation, DMARCSync, DomainDNSCheck, MailboxStatistics, AliasStatistics, MonitoredHost, BlacklistCheck, DMARCReport, DMARCRecord, TLSReport, TLSReportPolicy, SpamSuppression
+from .models import PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation, DMARCSync, DomainDNSCheck, MailboxStatistics, AliasStatistics, MonitoredHost, BlacklistCheck, DMARCReport, DMARCRecord, TLSReport, TLSReportPolicy, SpamSuppression, SMTPAbuseWhitelist, SMTPAbuseAction
 from .correlation import detect_direction, parse_postfix_message
 from .routers.domains import check_domain_dns, save_dns_check_to_db
 from .services.dmarc_imap_service import sync_dmarc_reports_from_imap
@@ -107,6 +107,7 @@ def reschedule_interval_jobs():
 
         # Reschedule suppression jobs based on current settings
         _reschedule_suppression_jobs()
+        _reschedule_smtp_abuse_job()
 
     except Exception as e:
         logger.warning("Failed to reschedule interval jobs: %s", e)
@@ -187,6 +188,28 @@ def _reschedule_suppression_jobs():
         except Exception:
             pass
 
+
+def _reschedule_smtp_abuse_job():
+    """Add or remove SMTP abuse protection when settings are reloaded."""
+    if not scheduler.running:
+        return
+    if settings.smtp_abuse_enabled and mailcow_api.has_rw_key:
+        scheduler.add_job(
+            smtp_abuse_job,
+            trigger=IntervalTrigger(minutes=1),
+            id='smtp_abuse',
+            name='SMTP Abuse Protection',
+            replace_existing=True,
+            max_instances=1,
+        )
+        logger.info("   [SMTP ABUSE] Protection scheduled (every minute; threshold: %s/%s minutes)",
+                    settings.smtp_abuse_threshold, settings.smtp_abuse_window_minutes)
+    else:
+        try:
+            scheduler.remove_job('smtp_abuse')
+        except Exception:
+            pass
+
 # Job execution tracking
 job_status = {
     'fetch_logs': {'last_run': None, 'status': 'idle', 'error': None},
@@ -211,7 +234,54 @@ job_status = {
     'expire_suppressions': {'last_run': None, 'status': 'idle', 'error': None},
     'process_quarantine_rules': {'last_run': None, 'status': 'idle', 'error': None},
     'cleanup_deferred_queue': {'last_run': None, 'status': 'idle', 'error': None},
+    'smtp_abuse': {'last_run': None, 'status': 'idle', 'error': None},
 }
+
+
+async def smtp_abuse_job():
+    """Block non-whitelisted mailboxes exceeding the rolling outbound threshold."""
+    update_job_status('smtp_abuse', 'running')
+    if not settings.smtp_abuse_enabled or not mailcow_api.has_rw_key:
+        update_job_status('smtp_abuse', 'success')
+        return
+    try:
+        from .routers.smtp_abuse import block_mailbox
+        cutoff = datetime.utcnow() - timedelta(minutes=settings.smtp_abuse_window_minutes)
+        with get_db_context() as db:
+            whitelist = {row.email for row in db.query(SMTPAbuseWhitelist).filter(SMTPAbuseWhitelist.active.is_(True)).all()}
+            candidates = db.query(
+                MessageCorrelation.sender.label('email'),
+                func.count(MessageCorrelation.id).label('message_count')
+            ).filter(
+                func.lower(MessageCorrelation.direction) == 'outbound',
+                MessageCorrelation.first_seen >= cutoff,
+                MessageCorrelation.sender.isnot(None),
+            ).group_by(MessageCorrelation.sender).having(
+                func.count(MessageCorrelation.id) > settings.smtp_abuse_threshold
+            ).all()
+            latest_action = db.query(
+                SMTPAbuseAction.email.label('email'),
+                func.max(SMTPAbuseAction.created_at).label('latest_created_at')
+            ).group_by(SMTPAbuseAction.email).subquery()
+            blocked_state = db.query(SMTPAbuseAction).join(
+                latest_action,
+                (SMTPAbuseAction.email == latest_action.c.email) &
+                (SMTPAbuseAction.created_at == latest_action.c.latest_created_at)
+            ).all()
+            blocked_recently = {row.email for row in blocked_state if row.action == 'blocked'}
+        for candidate in candidates:
+            email = candidate.email.lower().strip()
+            if email in whitelist or email in blocked_recently:
+                continue
+            await block_mailbox(email, int(candidate.message_count), automatic=True, operator='smtp-abuse')
+            logger.warning(f"[SMTP ABUSE] Blocked {email} after {candidate.message_count} messages in {settings.smtp_abuse_window_minutes} minutes")
+        update_job_status('smtp_abuse', 'success')
+    except asyncio.CancelledError:
+        update_job_status('smtp_abuse', 'success')
+        raise
+    except Exception as e:
+        logger.error(f"[SMTP ABUSE] Error: {e}", exc_info=True)
+        update_job_status('smtp_abuse', 'failed', str(e))
 
 # Number of hosts that were listed on actionable blacklists in the previous blacklist check run (for "cleared" notification)
 _blacklist_last_listed_actionable_count = 0
@@ -3113,6 +3183,21 @@ def start_scheduler():
             logger.info("Scheduled alias statistics job (interval: 5 minutes)")
         else:
             logger.info("   [FEATURE] Mailbox Stats feature disabled — skipping mailbox/alias stats jobs")
+
+        # Job 13b: SMTP Abuse Protection (disabled by default)
+        if settings.smtp_abuse_enabled and mailcow_api.has_rw_key:
+            scheduler.add_job(
+                smtp_abuse_job,
+                trigger=IntervalTrigger(minutes=1),
+                id='smtp_abuse',
+                name='SMTP Abuse Protection',
+                replace_existing=True,
+                max_instances=1,
+            )
+            logger.info("   [SMTP ABUSE] Protection: every minute (threshold: %s/%s minutes)",
+                        settings.smtp_abuse_threshold, settings.smtp_abuse_window_minutes)
+        else:
+            logger.info("   [SMTP ABUSE] Protection disabled or read-write Mailcow API key unavailable")
 
         # Job 15: Blacklist Check (daily at 5 AM)
         if settings.is_feature_enabled('blacklist'):

@@ -34,9 +34,22 @@ These settings **must** be configured in your `.env` file:
 
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
+| `MAILCOW_HOSTNAME` | string | (unset) | Optional Docker host-gateway hostname. Set this only when Mailcow runs on the same Docker host as the viewer and the public route causes NAT or certificate problems. Do not set it for a separate Mailcow host |
 | `MAILCOW_API_KEY_RW` | string | (empty) | mailcow API key — **Read-Write** (optional). Generate a separate key from System → API with write permissions. Used only for edit operations (e.g. Fail2Ban settings). When not set, edit features are disabled |
 | `MAILCOW_API_VERIFY_SSL` | boolean | `true` | Verify SSL certificates when connecting to mailcow API. Set to `false` for development environments with self-signed certificates |
 | `MAILCOW_API_TIMEOUT` | integer | `30` | API request timeout in seconds |
+
+### Docker host-gateway routing
+
+When the viewer and Mailcow run on the same Docker host, the Mailcow hostname may need to resolve through Docker's host gateway. This avoids hairpin NAT and certificate-routing problems when the hostname normally resolves to a public address.
+
+Add the hostname to the local `.env` file:
+
+```env
+MAILCOW_HOSTNAME=mail.example.com
+```
+
+Leave `MAILCOW_HOSTNAME` unset when Mailcow runs on another host. In that case, `MAILCOW_URL` must resolve normally from the viewer container and its TLS certificate must be trusted. Do not disable SSL verification just to work around a routing problem.
 
 ---
 
@@ -90,6 +103,19 @@ These settings **must** be configured in your `.env` file:
 | `SMTP_PASSWORD` | string | (empty) | SMTP password |
 | `SMTP_FROM` | string | (empty) | From address for emails (defaults to SMTP user if not set) |
 | `SMTP_RELAY_MODE` | boolean | `false` | Relay mode - send emails without authentication (for local relay servers). When enabled, username and password are not required |
+
+## SMTP Abuse Protection
+
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `SMTP_ABUSE_ENABLED` | boolean | `false` | Automatically disable SMTP for a mailbox after it exceeds the rolling outbound message threshold |
+| `SMTP_ABUSE_THRESHOLD` | integer | `100` | Maximum outbound messages allowed in the rolling window |
+| `SMTP_ABUSE_WINDOW_MINUTES` | integer | `60` | Rolling window used for counting outbound messages |
+| `SMTP_ABUSE_HELP_ADDRESS` | string | (empty) | Support address included in the security notification sent to a blocked mailbox |
+
+SMTP abuse protection requires `MAILCOW_API_KEY_RW`. It changes only the mailbox `smtp_access` setting, revokes app passwords, and leaves IMAP and SOGo enabled. Whitelist and manual block/unblock controls are available under **Security → Abuse Protection**.
+
+See [SMTP Abuse Protection](SMTP_Abuse_Protection.md) for the complete setup, API, notification, and deployment guide.
 
 ---
 

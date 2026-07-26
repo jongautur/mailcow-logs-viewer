@@ -42,6 +42,7 @@ When authentication is enabled, all API endpoints (except public endpoints liste
     - [Rspamd Maps](#rspamd-maps)
     - [Suppressions](#suppressions)
 19. [Quarantine Auto-Rules](#quarantine-auto-rules)
+20. [SMTP Abuse Protection](#smtp-abuse-protection)
 
 ---
 
@@ -1595,6 +1596,18 @@ Update Fail2Ban configuration on mailcow. Requires the Read-Write API key (`MAIL
 - `400 Bad Request`: Invalid payload or mailcow rejected the update
 - `403 Forbidden`: Read-Write API key is not configured
 - `503 Service Unavailable`: Could not reach the mailcow API
+
+#### POST /fail2ban/unban
+
+Unban an active Fail2Ban network on mailcow. The request is proxied to
+mailcow's `POST /api/v1/delete/fail2ban` endpoint.
+
+**Request Body:**
+```json
+{
+  "ip": "203.0.113.7/32"
+}
+```
 
 #### RW Status Check
 
@@ -5222,3 +5235,25 @@ Get quarantine rule action history (paginated).
 **Notes:**
 - Logs are automatically pruned based on `QUARANTINE_RULES_LOG_RETENTION_DAYS` (default: 30)
 - Each entry represents one automated action taken by the scheduler
+
+## SMTP Abuse Protection
+
+These authenticated endpoints manage rolling outbound SMTP protection. Blocking changes only `smtp_access`; IMAP and SOGo remain enabled. The status view includes internal SMTP activity for visibility, while automatic blocking counts only `outbound` messages.
+
+- `GET /api/smtp-abuse/status` — message counts, threshold, and whitelist state.
+- `GET /api/smtp-abuse/whitelist` — list whitelist entries.
+- `POST /api/smtp-abuse/whitelist` — add or reactivate an entry; body: `{"email":"trusted@example.com","notes":"optional"}`.
+- `PUT /api/smtp-abuse/whitelist` — replace the active whitelist; body: `{"emails":["trusted@example.com","monitoring@example.com"]}`.
+- `DELETE /api/smtp-abuse/whitelist/{email}` — deactivate an entry.
+- `POST /api/smtp-abuse/mailboxes/{email}/block` — manually disable SMTP and revoke app passwords.
+- `POST /api/smtp-abuse/mailboxes/{email}/unblock` — re-enable SMTP only.
+
+Automatic enforcement runs once per minute when `SMTP_ABUSE_ENABLED=true` and a read-write Mailcow API key is configured.
+
+The job can also be started manually with:
+
+```text
+POST /api/settings/jobs/smtp_abuse/run
+```
+
+Write operations require `SMTP_ABUSE_ENABLED=true` and `MAILCOW_API_KEY_RW`. All endpoints are protected by the application authentication middleware; separate administrator roles are not currently enforced by this feature.

@@ -634,6 +634,30 @@ class SpamSuppression(Base):
         return f"<SpamSuppression(email={self.email}, reason={self.reason}, active={self.active}, bounces={self.bounce_count})>"
 
 
+class SMTPAbuseWhitelist(Base):
+    __tablename__ = "smtp_abuse_whitelist"
+
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String(255), unique=True, nullable=False, index=True)
+    notes = Column(Text)
+    active = Column(Boolean, default=True, nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class SMTPAbuseAction(Base):
+    __tablename__ = "smtp_abuse_actions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String(255), nullable=False, index=True)
+    message_count = Column(Integer, nullable=False)
+    threshold = Column(Integer, nullable=False)
+    window_minutes = Column(Integer, nullable=False)
+    action = Column(String(30), nullable=False, default="blocked")
+    automatic = Column(Boolean, nullable=False, default=True)
+    operator = Column(String(255))
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+
 class QuarantineRule(Base):
     """
     Quarantine auto-processing rules.

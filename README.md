@@ -114,6 +114,13 @@ A modern, self-hosted dashboard for monitoring, analyzing, and managing your mai
 - **OAuth2/OIDC** — supports any standard provider (Mailcow, Keycloak, Auth0, Google, etc.)
 - Both methods can be enabled simultaneously
 
+### 🚨 SMTP Abuse Protection
+- Rolling-window outbound message threshold
+- SMTP-only blocking; IMAP and SOGo remain available
+- App-password revocation and user security notifications
+- Whitelist and manual block/re-enable controls
+- [SMTP Abuse Protection guide](documentation/SMTP_Abuse_Protection.md)
+
 ---
 
 ## Quick Start
@@ -131,6 +138,8 @@ docker compose up -d
 📖 **Full installation guide:** [Getting Started](documentation/GETTING_STARTED.md)
 
 📘 **Technical Overview: Email Authentication & Monitoring:** How can **mailcow-logs-viewer** help you with this [Read more](documentation/Email_Authentication_Monitoring.md)
+
+🛡️ **SMTP Abuse Protection:** Rolling-window SMTP controls, whitelist management, and deployment instructions [Read more](documentation/SMTP_Abuse_Protection.md)
 
 ---
 
@@ -161,11 +170,14 @@ All settings via environment variables or the **web UI** (when `SETTINGS_EDIT_VI
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `MAILCOW_API_KEY_RW` | (empty) | Read-Write API key — enables edit features (Fail2Ban, Queue, Quarantine, Rspamd sync) |
+| `MAILCOW_API_KEY_RW` | (empty) | Read-Write API key — enables edit features (Fail2Ban, Queue, Quarantine, Rspamd sync, SMTP abuse protection) |
 | `FETCH_INTERVAL` | `60` | Seconds between log fetches |
 | `RETENTION_DAYS` | `7` | Days to keep logs |
 | `RSPAMD_PASSWORD` | (empty) | Rspamd password — enables Spam Filter maps editor |
 | `SUPPRESSION_ENABLED` | `true` | Enable automatic email suppression |
+| `SMTP_ABUSE_ENABLED` | `false` | Enable automatic SMTP blocking for mailboxes exceeding the message threshold |
+| `SMTP_ABUSE_THRESHOLD` | `100` | Maximum outbound messages allowed in the rolling window |
+| `SMTP_ABUSE_WINDOW_MINUTES` | `60` | Rolling window used by SMTP abuse protection |
 | `BASIC_AUTH_ENABLED` | `true` | Enable HTTP Basic Authentication |
 | `SETTINGS_EDIT_VIA_UI_ENABLED` | `true` | Allow managing settings from the web UI |
 | `TZ` | `UTC` | Timezone |
@@ -181,6 +193,7 @@ All settings via environment variables or the **web UI** (when `SETTINGS_EDIT_VI
 | [Getting Started](documentation/GETTING_STARTED.md) | Installation and setup guide |
 | [ENV Settings](documentation/ENV_Settings.md) | Complete environment variables reference |
 | [API Documentation](documentation/API.md) | REST API reference |
+| [SMTP Abuse Protection](documentation/SMTP_Abuse_Protection.md) | SMTP abuse protection setup and operation |
 | [Settings UI](documentation/Settings_UI.md) | Web-based settings editor guide |
 | [OAuth2 Configuration](documentation/OAuth2_Configuration.md) | OAuth2/OIDC setup guide |
 | [Upgrade to V2](documentation/UpdateV2.md) | Migration guide from V1 |
